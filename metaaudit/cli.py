@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import __version__, snapshot_io
+from . import __version__, preflight, snapshot_io
 from .api import GraphClient, GraphError
 from .checks import all_checks, run_all
 from .config import Settings, Thresholds, load_env_file
@@ -51,6 +51,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run only this check (repeatable). --list-checks shows the ids.",
     )
     parser.add_argument("--list-checks", action="store_true", help="List check ids and exit")
+    parser.add_argument(
+        "--check-auth", action="store_true",
+        help="Verify the token and account with two cheap reads, then exit",
+    )
     parser.add_argument("--thresholds", help="JSON file overriding the default thresholds")
     parser.add_argument(
         "--save-snapshot", metavar="PATH",
@@ -115,6 +119,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
+    if args.from_snapshot and args.check_auth:
+        print(
+            "error: --check-auth talks to the API; it cannot run against a "
+            "saved snapshot",
+            file=sys.stderr,
+        )
+        return 2
+
     if args.from_snapshot:
         try:
             snapshot = snapshot_io.load(args.from_snapshot)
@@ -149,6 +161,11 @@ def main(argv: list[str] | None = None) -> int:
             settings.api_version,
             app_secret=settings.app_secret,
         )
+        if args.check_auth:
+            code, report = preflight.run(client, settings.ad_account_id)
+            print(report)
+            return code
+
         try:
             snapshot = fetch_snapshot(
                 client,

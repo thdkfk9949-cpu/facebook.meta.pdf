@@ -64,6 +64,33 @@ cp .env.example .env
 
 ## 실행
 
+### 0단계: 설정 확인 (먼저 이것부터)
+
+API 호출 2번만 쓰는 점검입니다. 토큰과 권한이 제대로 붙었는지 바로 알려줍니다.
+
+```bash
+python3 -m metaaudit --env-file .env --check-auth
+```
+
+성공하면 이렇게 나옵니다:
+
+```
+OK  token is valid and can read this ad account.
+
+  Name          : 우리쇼핑몰
+  Currency      : KRW  (minor unit divisor 1)
+  Timezone      : Asia/Seoul
+  Status        : ACTIVE
+  Lifetime spend: 48,250,000 KRW
+
+OK  campaigns edge is readable.
+```
+
+실패하면 원인과 고칠 지점을 같이 알려줍니다. 계정 노드는 읽히는데 캠페인 목록은 막히는
+경우도 잡아냅니다 — 권한 설정에서 흔한 실수입니다.
+
+### 1단계: 감사 실행
+
 ```bash
 # 기본: 최근 30일, 터미널 출력
 python3 -m metaaudit --env-file .env
