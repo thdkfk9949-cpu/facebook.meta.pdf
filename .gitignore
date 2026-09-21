@@ -1,0 +1,20 @@
+# Secrets — never commit access tokens
+.env
+.env.*
+!.env.example
+*.token
+credentials.json
+
+# Snapshots may contain account data
+snapshots/
+*.snapshot.json
+out/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
