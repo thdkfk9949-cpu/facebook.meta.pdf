@@ -162,7 +162,9 @@ def main(argv: list[str] | None = None) -> int:
             app_secret=settings.app_secret,
         )
         if args.check_auth:
-            code, report = preflight.run(client, settings.ad_account_id)
+            code, report = preflight.run(
+                client, settings.ad_account_id, env_file=args.env_file
+            )
             print(report)
             return code
 

@@ -18,9 +18,13 @@ from .currency import to_major
 
 log = logging.getLogger("metaaudit.fetch")
 
+# Every field here must be readable with ads_read alone. "business" was here
+# and is not: it requires business_management, which failed the whole audit
+# after preflight had already reported the setup healthy — and nothing read
+# it. Before adding a field, check the permission it needs.
 ACCOUNT_FIELDS = [
     "id", "name", "account_status", "currency", "timezone_name",
-    "amount_spent", "spend_cap", "business", "disable_reason",
+    "amount_spent", "spend_cap", "disable_reason",
 ]
 
 CAMPAIGN_FIELDS = [

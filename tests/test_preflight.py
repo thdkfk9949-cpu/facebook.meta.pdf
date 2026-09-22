@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -52,6 +53,36 @@ class TestPreflight(unittest.TestCase):
         )
         _, report = preflight.run(client, "act_1")
         self.assertIn("50,000.00 USD", report)
+
+    def test_probe_requests_exactly_what_the_audit_will(self):
+        # Regression: preflight read a smaller field set than fetch, so it
+        # reported a healthy setup and the audit then died on
+        # "(#100) Requires business_management permission to access the field".
+        from metaaudit.fetch import ACCOUNT_FIELDS
+
+        client, session, _ = client_with(
+            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []})]
+        )
+        preflight.run(client, "act_1")
+        probed = session.calls[0][1]["fields"].split(",")
+        self.assertEqual(probed, list(ACCOUNT_FIELDS))
+
+    def test_account_fields_need_no_permission_beyond_ads_read(self):
+        from metaaudit.fetch import ACCOUNT_FIELDS
+
+        # Fields Meta gates behind business_management or ads_management.
+        gated = {"business", "owner", "funding_source_details", "users",
+                 "agency_client_declaration", "extended_credit_invoice_group"}
+        self.assertEqual(gated & set(ACCOUNT_FIELDS), set())
+
+    def test_hint_is_runnable_on_this_platform(self):
+        client, _, _ = client_with(
+            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []})]
+        )
+        code, report = preflight.run(client, "act_1", env_file=".env")
+        self.assertEqual(code, 0)
+        self.assertIn("--env-file .env", report)
+        self.assertIn("py -m metaaudit" if os.name == "nt" else "python3 -m metaaudit", report)
 
     def test_bad_token_is_diagnosed_not_raised(self):
         client, _, _ = client_with(

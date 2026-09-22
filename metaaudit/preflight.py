@@ -8,8 +8,11 @@ the token can see, which is what you want before the real run.
 
 from __future__ import annotations
 
+import os
+
 from .api import GraphClient, GraphError
 from .currency import fmt, offset_for
+from .fetch import ACCOUNT_FIELDS
 
 # Numeric account_status values Meta returns, and what they mean for spending.
 ACCOUNT_STATUS = {
@@ -23,10 +26,14 @@ ACCOUNT_STATUS = {
     101: ("CLOSED", False),
 }
 
-FIELDS = "id,name,currency,timezone_name,account_status,amount_spent,disable_reason"
+# Probe exactly what the audit will ask for. A preflight that reads a smaller
+# set can pass and still be followed by a permission failure mid-audit.
+FIELDS = ",".join(ACCOUNT_FIELDS)
 
 
-def run(client: GraphClient, account_id: str) -> tuple[int, str]:
+def run(
+    client: GraphClient, account_id: str, *, env_file: str | None = None
+) -> tuple[int, str]:
     """Return (exit_code, report). Never raises: the report is the diagnosis."""
     lines: list[str] = []
     lines.append(f"Graph API version : {client.api_version}")
@@ -96,5 +103,9 @@ def run(client: GraphClient, account_id: str) -> tuple[int, str]:
     lines.append(f"  API requests used by this check: {client.request_count}")
     lines.append("")
     lines.append("Setup looks good. Run the audit:")
-    lines.append(f"  python3 -m metaaudit --account {account_id} --window 7")
+    runner = "py" if os.name == "nt" else "python3"
+    cmd = f"  {runner} -m metaaudit"
+    if env_file:
+        cmd += f" --env-file {env_file}"
+    lines.append(cmd)
     return 0, "\n".join(lines)
