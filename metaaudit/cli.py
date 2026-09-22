@@ -8,12 +8,66 @@ import os
 import sys
 from pathlib import Path
 
-from . import __version__, preflight, snapshot_io
+from . import __version__, apply as apply_mod, plan as plan_mod, preflight, snapshot_io
 from .api import GraphClient, GraphError
 from .checks import all_checks, run_all
 from .config import Settings, Thresholds, load_env_file
 from .fetch import fetch_snapshot
 from .report import RENDERERS
+
+
+def _runner() -> str:
+    return "py" if os.name == "nt" else "python3"
+
+
+def _apply(args: argparse.Namespace, client: GraphClient) -> int:
+    """Apply a reviewed plan. Confirms first unless --yes."""
+    try:
+        plan = plan_mod.loads(Path(args.apply).read_text(encoding="utf-8"))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"error: could not read plan: {exc}", file=sys.stderr)
+        return 2
+
+    print(plan_mod.render(plan))
+    print()
+
+    if plan.is_empty:
+        print("plan contains no changes; nothing to do.", file=sys.stderr)
+        return 0
+
+    if not args.yes and not args.dry_run:
+        if not sys.stdin.isatty():
+            print(
+                "error: --apply needs a terminal to confirm. Pass --yes if you "
+                "have already reviewed this plan.",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            f"About to change {len(plan.changes)} object(s) in {plan.account_id}.",
+            file=sys.stderr,
+        )
+        answer = input("Type 'apply' to proceed: ").strip()
+        if answer != "apply":
+            print("aborted; nothing was changed.", file=sys.stderr)
+            return 1
+
+    rollback = args.rollback_out
+    if rollback is None:
+        rollback = str(Path(args.apply).with_suffix(".rollback.json"))
+
+    outcomes = apply_mod.apply_plan(
+        client, plan, rollback_path=rollback, dry_run=args.dry_run
+    )
+    print(apply_mod.summarize(outcomes, plan.currency))
+
+    if not args.dry_run:
+        print(f"\nundo file: {rollback}", file=sys.stderr)
+    if any(o.state == "failed" for o in outcomes):
+        return 3
+    if any(o.state == "skipped" and o.detail != "dry run" for o in outcomes):
+        return 1
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,6 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "The audit never writes to the account: it issues GET requests only.\n"
+            "--plan proposes changes without writing anything; only --apply "
+            "writes,\nand only the structural fixes a plan file already spells "
+            "out.\n"
             "Credentials come from the environment or --env-file, never from "
             "arguments,\nso they do not land in your shell history."
         ),
@@ -68,6 +125,39 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-on", choices=["never", "critical", "high", "medium", "low", "any"],
         default="never",
         help="Exit non-zero when a finding at or above this severity exists (for CI)",
+    )
+    write = parser.add_argument_group(
+        "changing the account",
+        "Off by default. --plan writes nothing; --apply writes only what a "
+        "plan file lists.",
+    )
+    write.add_argument(
+        "--plan", metavar="PATH",
+        help="Write a reviewable change plan here instead of only reporting",
+    )
+    write.add_argument(
+        "--apply", metavar="PATH",
+        help="Apply a plan file. Requires confirmation unless --yes is given.",
+    )
+    write.add_argument(
+        "--allow-budget-increase", type=float, default=0.0, metavar="AMOUNT",
+        help=(
+            "Daily budget increase the plan may propose, in account currency. "
+            "Default 0: consolidation is free and needs no allowance, raising "
+            "a budget spends real money every day and needs a number here."
+        ),
+    )
+    write.add_argument(
+        "--rollback-out", metavar="PATH",
+        help="Where --apply writes the undo file (default: alongside the plan)",
+    )
+    write.add_argument(
+        "--yes", action="store_true",
+        help="Skip the confirmation prompt for --apply (for scripts)",
+    )
+    write.add_argument(
+        "--dry-run", action="store_true",
+        help="With --apply: verify every current value, write nothing",
     )
     parser.add_argument("-v", "--verbose", action="count", default=0)
     return parser
@@ -119,6 +209,22 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
+    if args.apply and args.from_snapshot:
+        print(
+            "error: --apply writes to the live account; it cannot run against "
+            "a saved snapshot",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.apply and args.plan:
+        print(
+            "error: --plan and --apply are separate steps. Build the plan, "
+            "read it, then apply it.",
+            file=sys.stderr,
+        )
+        return 2
+
     if args.from_snapshot and args.check_auth:
         print(
             "error: --check-auth talks to the API; it cannot run against a "
@@ -168,6 +274,9 @@ def main(argv: list[str] | None = None) -> int:
             print(report)
             return code
 
+        if args.apply:
+            return _apply(args, client)
+
         try:
             snapshot = fetch_snapshot(
                 client,
@@ -188,6 +297,28 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     results = run_all(snapshot, thresholds, only=args.only)
+
+    if args.plan:
+        built = plan_mod.build_plan(
+            snapshot, results, budget_allowance=args.allow_budget_increase
+        )
+        Path(args.plan).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.plan).write_text(plan_mod.dumps(built), encoding="utf-8")
+        print(plan_mod.render(built))
+        print()
+        print(f"plan written to {args.plan}", file=sys.stderr)
+        if built.is_empty:
+            print("nothing to apply.", file=sys.stderr)
+        else:
+            print(
+                f"review it, then apply with:\n"
+                f"  {_runner()} -m metaaudit"
+                + (f" --env-file {args.env_file}" if args.env_file else "")
+                + f" --apply {args.plan}",
+                file=sys.stderr,
+            )
+        return 0
+
     report = RENDERERS[args.format](snapshot, results, thresholds)
 
     if args.out:

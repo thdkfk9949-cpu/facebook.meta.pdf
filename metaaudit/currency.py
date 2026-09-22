@@ -41,3 +41,12 @@ def fmt(amount: float, currency: str) -> str:
     if offset_for(currency) == 1:
         return f"{amount:,.0f} {currency}"
     return f"{amount:,.2f} {currency}"
+
+
+def to_minor(amount: float, currency: str) -> int:
+    """Convert a major-unit amount to the integer Meta expects on writes.
+
+    The inverse of :func:`to_major`. Rounds rather than truncates: a budget of
+    10000.4 won must not be written as 10000 and then read back as a change.
+    """
+    return int(round(float(amount) * offset_for(currency)))

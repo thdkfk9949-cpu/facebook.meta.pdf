@@ -3,7 +3,12 @@
 Deliberately built on ``requests`` alone rather than the facebook-business
 SDK: the SDK pins its own Graph version and turns a version bump into a
 dependency upgrade, and it hides the rate-limit headers this client needs to
-read. Everything here is read-only — no POST, no DELETE.
+read.
+
+The audit itself is read-only and uses :meth:`GraphClient.get` alone. Writes
+live behind :meth:`GraphClient.post`, which exists only to apply a plan a
+human has reviewed, refuses any field outside a fixed allow-list, and never
+deletes anything.
 """
 
 from __future__ import annotations
@@ -215,11 +220,19 @@ class GraphClient:
         url = f"{GRAPH_HOST}/{self.api_version}/{path.lstrip('/')}"
         return self._request(url, {**(params or {}), **self._auth_params()})
 
-    def _request(self, url: str, params: dict[str, Any] | None) -> dict[str, Any]:
+    def _request(
+        self, url: str, params: dict[str, Any] | None, method: str = "GET"
+    ) -> dict[str, Any]:
         last: GraphError | None = None
         for attempt in range(self.max_retries):
             try:
-                resp = self.session.get(url, params=params, timeout=self.timeout)
+                # Retrying a POST is safe here only because every writable
+                # field is an idempotent set: writing the same budget or the
+                # same status twice lands on the same state.
+                if method == "POST":
+                    resp = self.session.post(url, data=params, timeout=self.timeout)
+                else:
+                    resp = self.session.get(url, params=params, timeout=self.timeout)
             except requests.RequestException as exc:
                 if attempt == self.max_retries - 1:
                     raise GraphError(0, {"error": {"message": str(exc)}}, self._redact(url))
@@ -254,6 +267,24 @@ class GraphClient:
             self._sleep(delay)
             last = err
         raise last or GraphError(0, {"error": {"message": "exhausted retries"}}, url)
+
+    # -- writes -------------------------------------------------------------
+
+    # The only fields a plan may write. The audit never calls post() at all;
+    # this list is the second lock, so a bug elsewhere cannot turn a report
+    # into an edit of something nobody reviewed.
+    WRITABLE_FIELDS = frozenset({"daily_budget", "status"})
+
+    def post(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Write one or more allow-listed fields on a single object."""
+        rejected = sorted(set(params) - self.WRITABLE_FIELDS)
+        if rejected:
+            raise ValueError(
+                f"refusing to write {', '.join(rejected)}: not in the "
+                f"allow-list ({', '.join(sorted(self.WRITABLE_FIELDS))})"
+            )
+        url = f"{GRAPH_HOST}/{self.api_version}/{path.lstrip('/')}"
+        return self._request(url, {**params, **self._auth_params()}, method="POST")
 
     def paginate(
         self,
