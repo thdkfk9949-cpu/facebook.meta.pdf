@@ -262,7 +262,7 @@ python3 -m metaaudit --env-file .env --thresholds my-thresholds.json
 python3 -m unittest discover -s tests -t .
 ```
 
-130개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
+138개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
 산술적으로 명확하게 설계돼 있어서, 테스트가 "뭔가 떴다"가 아니라 정확한 값을 단언합니다.
 
 ### 구조

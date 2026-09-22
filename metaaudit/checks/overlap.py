@@ -98,15 +98,24 @@ def check_self_competition(snap: Snapshot, th: Thresholds) -> CheckResult:
     result = CheckResult(
         "structure.self_competition", "Ad sets competing against each other"
     )
-    any_targeting = False
+    # Three different reasons this check can produce nothing, and they call
+    # for three different sentences. Saying "the token may lack permission"
+    # when the account simply has one ad set sends someone hunting for a
+    # problem they do not have.
+    delivering_adsets = 0
+    with_targeting = 0
+    comparable = False
 
     for campaign in snap.campaigns:
         if not campaign.is_delivering:
             continue
-        members = [a for a in campaign.active_adsets if a.targeting]
+        active = campaign.active_adsets
+        delivering_adsets += len(active)
+        members = [a for a in active if a.targeting]
+        with_targeting += len(members)
         if len(members) < 2:
             continue
-        any_targeting = True
+        comparable = True
 
         by_demo: dict[str, list[AdSet]] = defaultdict(list)
         for adset in members:
@@ -210,9 +219,20 @@ def check_self_competition(snap: Snapshot, th: Thresholds) -> CheckResult:
                 )
             )
 
-    if not any_targeting and not result.findings:
-        result.skipped_reason = (
-            "no targeting specs were returned — the token may lack permission "
-            "to read targeting on this account"
-        )
+    if not comparable and not result.findings:
+        if delivering_adsets == 0:
+            result.skipped_reason = (
+                "no campaign has a delivering ad set, so nothing can compete"
+            )
+        elif with_targeting == 0:
+            result.skipped_reason = (
+                "no targeting specs were returned — the token may lack "
+                "permission to read targeting on this account"
+            )
+        else:
+            result.skipped_reason = (
+                f"no campaign has two or more delivering ad sets "
+                f"({delivering_adsets} across the account), so none can compete "
+                f"with another"
+            )
     return result

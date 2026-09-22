@@ -233,3 +233,67 @@ class TestSnapshotIO(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPoissonIntervals(unittest.TestCase):
+    """Exact bounds, checked against published Garwood tables."""
+
+    def test_matches_published_95_percent_values(self):
+        from metaaudit.stats import poisson_interval
+
+        for count, (lo, hi) in [
+            (0, (0.000, 3.689)),
+            (1, (0.025, 5.572)),
+            (5, (1.623, 11.668)),
+            (10, (4.795, 18.390)),
+            (100, (81.36, 121.63)),
+        ]:
+            got_lo, got_hi = poisson_interval(count)
+            self.assertAlmostEqual(got_lo, lo, places=2, msg=f"lower at n={count}")
+            self.assertAlmostEqual(got_hi, hi, places=2, msg=f"upper at n={count}")
+
+    def test_lower_bound_is_never_negative(self):
+        from metaaudit.stats import poisson_interval
+
+        for count in range(0, 40):
+            lo, hi = poisson_interval(count)
+            self.assertGreaterEqual(lo, 0.0, f"n={count}")
+            self.assertLess(lo, hi, f"n={count}")
+
+
+class TestCpaInterval(unittest.TestCase):
+    def test_a_single_conversion_gives_a_positive_ordered_interval(self):
+        # Regression: the symmetric form reported a CPA "between -78,934 and
+        # 243,380 KRW" off one conversion. A CPA cannot be negative, and the
+        # real upper bound is an order of magnitude higher than that.
+        from metaaudit.stats import cpa_interval
+
+        low, high = cpa_interval(82223, 1)
+        self.assertGreater(low, 0)
+        self.assertLess(low, 82223)
+        self.assertGreater(high, 82223)
+        self.assertAlmostEqual(low, 82223 / 5.5716, delta=50)
+        self.assertAlmostEqual(high, 82223 / 0.02532, delta=20000)
+
+    def test_the_point_estimate_always_sits_inside(self):
+        from metaaudit.stats import cpa_interval
+
+        for conv in range(1, 60):
+            spend = 1000.0 * conv
+            low, high = cpa_interval(spend, conv)
+            self.assertLessEqual(low, spend / conv)
+            self.assertGreaterEqual(high, spend / conv)
+
+    def test_the_interval_narrows_as_conversions_accumulate(self):
+        from metaaudit.stats import cpa_interval
+
+        widths = []
+        for conv in (2, 10, 50, 200):
+            low, high = cpa_interval(1000.0 * conv, conv)
+            widths.append((high - low) / (1000.0))
+        self.assertEqual(widths, sorted(widths, reverse=True))
+
+    def test_no_conversions_means_no_interval_not_a_made_up_one(self):
+        from metaaudit.stats import cpa_interval
+
+        self.assertIsNone(cpa_interval(50000, 0))

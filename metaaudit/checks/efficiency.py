@@ -14,7 +14,7 @@ from __future__ import annotations
 from ..config import Thresholds
 from ..currency import fmt
 from ..fetch import Snapshot
-from ..stats import assess, cpa_relative_margin, two_proportion_p
+from ..stats import assess, cpa_interval, cpa_relative_margin, two_proportion_p
 from .base import CheckResult, Confidence, Finding, Severity, register
 
 
@@ -123,10 +123,18 @@ def check_undecidable(snap: Snapshot, th: Thresholds) -> CheckResult:
         sufficiency = assess(conv, th.min_conversions_for_claim)
         if sufficiency.ok or conv == 0:
             continue  # zero-conversion ad sets are handled by tracking.silent
-        margin = cpa_relative_margin(conv)
         cpa = adset.insights.spend / conv
-        low = cpa * (1 - (margin or 0))
-        high = cpa * (1 + (margin or 0))
+        # Exact Poisson bounds, not cpa*(1 +/- margin): below four conversions
+        # the symmetric form puts the lower bound under zero, and a CPA that
+        # reads "between -78,934 and 243,380" teaches the reader nothing except
+        # to distrust the tool.
+        bounds = cpa_interval(adset.insights.spend, conv)
+        low, high = bounds if bounds else (cpa, cpa)
+        margin = cpa_relative_margin(conv)
+        high_text = (
+            "no upper bound at all" if high == float("inf")
+            else fmt(high, snap.currency)
+        )
         result.findings.append(
             Finding(
                 check_id="efficiency.undecidable",
@@ -139,8 +147,8 @@ def check_undecidable(snap: Snapshot, th: Thresholds) -> CheckResult:
                 detail=(
                     f"{conv} conversions over {snap.window_days} days puts the "
                     f"true CPA somewhere between {fmt(low, snap.currency)} and "
-                    f"{fmt(high, snap.currency)}. Any decision that would flip "
-                    "inside that range is a coin toss."
+                    f"{high_text} (exact Poisson, 95%). Any decision that would "
+                    "flip inside that range is a coin toss."
                 ),
                 recommendation=(
                     f"Let it reach {th.min_conversions_for_claim} conversions "
@@ -150,7 +158,8 @@ def check_undecidable(snap: Snapshot, th: Thresholds) -> CheckResult:
                     "conversions": conv,
                     "cpa": round(cpa, 2),
                     "cpa_low": round(low, 2),
-                    "cpa_high": round(high, 2),
+                    "cpa_high": None if high == float("inf") else round(high, 2),
+                    "interval_method": "poisson_exact_95",
                 },
                 spend_at_stake=adset.insights.spend,
             )

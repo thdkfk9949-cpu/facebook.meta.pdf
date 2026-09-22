@@ -358,3 +358,49 @@ class TestRobustness(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSelfCompetitionSkipReasons(unittest.TestCase):
+    """A skip must name the real reason — they lead to different actions."""
+
+    def _snap(self, adsets):
+        from metaaudit.fetch import Campaign, Snapshot
+
+        return Snapshot(
+            account_id="act_1", account_name="a", currency="KRW",
+            timezone="Asia/Seoul", window_days=30,
+            since="2026-01-01", until="2026-01-30",
+            prev_since="2025-12-02", prev_until="2025-12-31",
+            campaigns=[Campaign(
+                id="c1", name="c", status="ACTIVE", effective_status="ACTIVE",
+                adsets=adsets,
+            )],
+        )
+
+    def _adset(self, aid, targeting):
+        from metaaudit.fetch import AdSet
+
+        return AdSet(
+            id=aid, name=aid, campaign_id="c1", status="ACTIVE",
+            effective_status="ACTIVE", targeting=targeting,
+        )
+
+    def test_one_adset_is_not_reported_as_a_permission_problem(self):
+        # Regression: a single-ad-set account was told its token might lack
+        # permission to read targeting, which sent the reader looking for a
+        # problem that was not there.
+        from metaaudit.checks.overlap import check_self_competition
+        from metaaudit.config import Thresholds
+
+        snap = self._snap([self._adset("a1", {"age_min": 25})])
+        result = check_self_competition(snap, Thresholds())
+        self.assertIn("two or more delivering ad sets", result.skipped_reason)
+        self.assertNotIn("permission", result.skipped_reason)
+
+    def test_missing_targeting_still_names_permissions(self):
+        from metaaudit.checks.overlap import check_self_competition
+        from metaaudit.config import Thresholds
+
+        snap = self._snap([self._adset("a1", {}), self._adset("a2", {})])
+        result = check_self_competition(snap, Thresholds())
+        self.assertIn("permission", result.skipped_reason)
