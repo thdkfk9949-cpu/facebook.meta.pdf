@@ -106,6 +106,11 @@ python3 -m metaaudit --list-checks
 python3 -m metaaudit --env-file .env --only learning.underbudgeted --only structure.fragmentation
 ```
 
+### 윈도우에서 두 번 클릭으로 돌리기
+
+`.env`를 채워뒀다면 `run-audit.bat`을 더블클릭하면 끝입니다. 인증을 먼저 확인하고,
+날짜별 스냅샷과 마크다운 리포트를 만든 뒤 리포트를 열어줍니다.
+
 ### API 호출을 아끼는 법
 
 스냅샷을 저장해두면 감사 로직을 몇 번을 다시 돌려도 API를 전혀 쓰지 않습니다.
