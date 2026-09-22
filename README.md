@@ -194,7 +194,7 @@ python3 -m metaaudit --env-file .env --fail-on critical   # CRITICAL 있으면 e
 
 | ID | 잡아내는 것 |
 |---|---|
-| `learning.underbudgeted` | 예산이 CPA 대비 낮아 주 50이벤트에 산술적으로 도달 불가능한 광고세트 |
+| `learning.underbudgeted` | 예산이 CPA 대비 낮아 주 50이벤트에 산술적으로 도달 불가능한 광고세트 — 도달 가능한 상위 퍼널 이벤트와 그 필요 예산을 같이 제시 |
 | `learning.stuck` | 메타가 직접 LEARNING / LEARNING_LIMITED로 표시한 광고세트 |
 | `structure.fragmentation` | 예산이 감당할 수 있는 것보다 많은 광고세트로 쪼개진 캠페인 |
 | `structure.self_competition` | 같은 캠페인 안에서 서로 경쟁하는 광고세트 (2단계 판정) |
@@ -262,7 +262,7 @@ python3 -m metaaudit --env-file .env --thresholds my-thresholds.json
 python3 -m unittest discover -s tests -t .
 ```
 
-140개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
+153개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
 산술적으로 명확하게 설계돼 있어서, 테스트가 "뭔가 떴다"가 아니라 정확한 값을 단언합니다.
 
 ### 구조
@@ -273,6 +273,7 @@ metaaudit/
 ├── fetch.py        계정 전체를 메모리 스냅샷으로 수집
 ├── stats.py        유의성 검정 — 모든 성과 주장이 여기를 통과해야 함
 ├── checks/         감사 항목. 순수 함수이며 I/O 없음
+├── funnel.py       퍼널 단계별 단가 — "이 예산으로 살 수 있는 이벤트는 무엇인가"
 ├── plan.py         구조 항목 → 검토 가능한 변경안. I/O 없음
 ├── apply.py        승인된 변경안 적용 — 쓰기 전 읽기, 되돌리기 기록
 ├── report.py       text / markdown / json 렌더러

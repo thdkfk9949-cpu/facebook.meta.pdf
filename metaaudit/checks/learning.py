@@ -14,6 +14,8 @@ from __future__ import annotations
 from ..config import Thresholds
 from ..fetch import Snapshot, AdSet, Campaign
 from ..currency import fmt
+from ..fetch import NON_CONVERSION_GOALS
+from ..funnel import cheapest_reachable, nearest_priceable
 from .base import CheckResult, Confidence, Finding, Severity, register
 
 
@@ -41,6 +43,148 @@ def _cpa_for(adset: AdSet, campaign: Campaign | None, snap: Snapshot) -> tuple[f
 def required_daily_budget(cpa: float, thresholds: Thresholds) -> float:
     """Daily spend needed to buy 50 optimization events in 7 days."""
     return cpa * thresholds.events_to_exit_learning / 7.0
+
+
+# Kept in step with tracking.goal_mismatch: the objectives where buying
+# clicks instead of conversions is a defect rather than a choice.
+CONVERSION_OBJECTIVES = {
+    "OUTCOME_SALES", "CONVERSIONS", "PRODUCT_CATALOG_SALES",
+    "OUTCOME_LEADS", "LEAD_GENERATION",
+}
+
+
+def _funnel_source(adset, campaign):
+    """Price the funnel off whichever numbers are thick enough to mean anything.
+
+    An ad set that has just started carries too few actions to price; its
+    campaign has the same funnel and more of it.
+    """
+    if adset.insights.spend >= campaign.insights.spend:
+        return adset.insights
+    return campaign.insights
+
+
+def _funnel_evidence(adset, campaign, budget, th) -> dict:
+    insights = _funnel_source(adset, campaign)
+    reachable = cheapest_reachable(
+        insights,
+        budget,
+        events_to_exit_learning=th.events_to_exit_learning,
+        min_events_to_price=th.min_conversions_for_claim,
+    )
+    nearest = nearest_priceable(
+        insights,
+        events_to_exit_learning=th.events_to_exit_learning,
+        min_events_to_price=th.min_conversions_for_claim,
+    )
+    out: dict = {}
+    if reachable:
+        out["reachable_event"] = {
+            "event": reachable.event,
+            "observed": reachable.count,
+            "cost_per_event": round(reachable.cost, 2),
+            "required_daily_budget": round(reachable.required_daily, 2),
+        }
+    if nearest:
+        out["deepest_priceable_event"] = {
+            "event": nearest.event,
+            "observed": nearest.count,
+            "cost_per_event": round(nearest.cost, 2),
+            "required_daily_budget": round(nearest.required_daily, 2),
+        }
+    return out
+
+
+def _recommend(adset, campaign, snap, budget, required, th) -> str:
+    """What to actually do — checked against this account, not a template.
+
+    Telling a one-ad-set account to merge into a sibling is advice it cannot
+    take, and "raise to 587,307/day" on a 10,000/day account is a number
+    nobody will act on. Both were being printed.
+    """
+    cur = snap.currency
+    siblings = [a for a in campaign.active_adsets if a.id != adset.id]
+    insights = _funnel_source(adset, campaign)
+    reachable = cheapest_reachable(
+        insights,
+        budget,
+        events_to_exit_learning=th.events_to_exit_learning,
+        min_events_to_price=th.min_conversions_for_claim,
+    )
+    nearest = nearest_priceable(
+        insights,
+        events_to_exit_learning=th.events_to_exit_learning,
+        min_events_to_price=th.min_conversions_for_claim,
+    )
+
+    parts: list[str] = []
+    # A conversion campaign told to buy clicks is what tracking.goal_mismatch
+    # calls CRITICAL. Recommending it here to escape the learning phase would
+    # have this tool contradict itself, so a shallow event is only ever
+    # offered with the trade-off stated and the conversion event priced.
+    conversion_objective = campaign.objective in CONVERSION_OBJECTIVES
+    shallow = reachable is not None and reachable.event in NON_CONVERSION_GOALS
+
+    if reachable is not None and not (conversion_objective and shallow):
+        parts.append(
+            f"Optimise for {reachable.event} instead. It costs "
+            f"{fmt(reachable.cost, cur)} here ({reachable.count} observed), so "
+            f"{th.events_to_exit_learning} a week needs "
+            f"{fmt(reachable.required_daily, cur)}/day — inside the "
+            f"{fmt(budget, cur)}/day this ad set already has. An event this "
+            f"budget can actually buy beats a deeper one it cannot."
+        )
+        if nearest is not None and nearest.event != reachable.event:
+            parts.append(
+                f"{nearest.event} would be the better proxy at "
+                f"{fmt(nearest.required_daily, cur)}/day if the budget can go "
+                f"there."
+            )
+    elif reachable is not None and shallow and conversion_objective:
+        deeper = nearest if nearest and nearest.event != reachable.event else None
+        parts.append(
+            f"The only event this {fmt(budget, cur)}/day can buy 50 of a week "
+            f"is {reachable.event} at {fmt(reachable.required_daily, cur)}/day "
+            f"— but this is a {campaign.objective} campaign, and optimising "
+            f"for clicks inside one buys the cheapest clicks, not buyers."
+        )
+        if deeper is not None:
+            increase = deeper.required_daily - budget
+            parts.append(
+                f"Raise the budget to {fmt(deeper.required_daily, cur)}/day "
+                f"(+{fmt(increase, cur)}) and optimise for {deeper.event} "
+                f"instead: {fmt(deeper.cost, cur)} each over "
+                f"{deeper.count} observed, and it is a real step toward the "
+                f"purchase rather than away from it."
+            )
+        else:
+            parts.append(
+                "Raise the budget until a conversion event is affordable, or "
+                "accept that this campaign is buying traffic, not conversions."
+            )
+    elif nearest is not None:
+        parts.append(
+            f"No funnel event is reachable at {fmt(budget, cur)}/day. The "
+            f"closest is {nearest.event} at {fmt(nearest.cost, cur)} each "
+            f"({nearest.count} observed), needing "
+            f"{fmt(nearest.required_daily, cur)}/day — aim at that number "
+            f"rather than at {fmt(required, cur)}/day."
+        )
+    else:
+        parts.append(
+            f"Raise this ad set to {fmt(required, cur)}/day, or optimise for "
+            f"an earlier funnel event. There is not yet enough action data "
+            f"here to price which earlier event would work."
+        )
+
+    if siblings:
+        parts.append(
+            f"Consolidating also works and costs nothing: this campaign has "
+            f"{len(siblings)} other delivering ad set(s), and the budget is "
+            f"better spent as one ad set that exits learning than as "
+            f"{len(siblings) + 1} that never do."
+        )
+    return " ".join(parts)
 
 
 @register("learning.underbudgeted", "Ad sets that cannot reach 50 events/week")
@@ -96,10 +240,8 @@ def check_underbudgeted(snap: Snapshot, th: Thresholds) -> CheckResult:
                     f"Leaving the learning phase needs {th.events_to_exit_learning}. "
                     f"That requires {fmt(required, cur)}/day at this CPA."
                 ),
-                recommendation=(
-                    f"Consolidate. Either raise this ad set to {fmt(required, cur)}/day "
-                    f"or merge it into a sibling ad set — the budget is better spent "
-                    f"as one ad set that exits learning than as two that never do."
+                recommendation=_recommend(
+                    adset, campaign, snap, budget, required, th
                 ),
                 evidence={
                     "daily_budget": round(budget, 2),
@@ -108,6 +250,7 @@ def check_underbudgeted(snap: Snapshot, th: Thresholds) -> CheckResult:
                     "required_daily_budget": round(required, 2),
                     "achievable_weekly_events": round(achievable_weekly, 1),
                     "learning_stage": adset.learning_status,
+                    **_funnel_evidence(adset, campaign, budget, th),
                 },
                 spend_at_stake=adset.insights.spend,
             )
