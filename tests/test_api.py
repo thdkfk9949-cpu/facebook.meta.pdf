@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import unittest
 
+import requests
+
 from metaaudit.api import GraphClient, GraphError
 
 
@@ -69,6 +71,56 @@ class TestRedaction(unittest.TestCase):
         client, _, _ = client_with([])
         once = client._redact("https://x/?access_token=A")
         self.assertEqual(client._redact(once), once)
+
+
+class TestTransportErrorRedaction(unittest.TestCase):
+    """Regression: a connection failure leaked the token.
+
+    ``requests`` builds its exception message from the *prepared* URL, which
+    carries the query string, so the token rode out inside the message even
+    though the url argument was redacted.
+    """
+
+    def test_connection_error_message_is_redacted(self):
+        real_url = (
+            "https://graph.facebook.com/v23.0/act_1"
+            "?fields=name&access_token=SECRET&appsecret_proof=PROOF"
+        )
+
+        class ExplodingSession:
+            def get(self, url, params=None, timeout=None):
+                raise requests.ConnectionError(
+                    f"Max retries exceeded with url: {real_url} "
+                    "(Caused by ProxyError('Unable to connect to proxy'))"
+                )
+
+        client = GraphClient(
+            "SECRET",
+            "v23.0",
+            app_secret="s3cr3t",
+            session=ExplodingSession(),
+            max_retries=1,
+            sleep=lambda _: None,
+        )
+        with self.assertRaises(GraphError) as ctx:
+            client.get("act_1", {"fields": "name"})
+
+        rendered = str(ctx.exception)
+        self.assertNotIn("SECRET", rendered)
+        self.assertNotIn("PROOF", rendered)
+        self.assertNotIn("SECRET", ctx.exception.message)
+        # The diagnosis must survive the redaction.
+        self.assertIn("Unable to connect to proxy", rendered)
+        self.assertIn("fields=name", rendered)
+
+    def test_error_body_echoing_a_token_is_redacted(self):
+        # Non-JSON error bodies are passed through verbatim; if one echoes the
+        # request, it must not carry the token with it.
+        body = "Bad Request: /v23.0/act_1?access_token=SECRET"
+        client, _, _ = client_with([FakeResponse(400, None, text=body)])
+        with self.assertRaises(GraphError) as ctx:
+            client.get("act_1")
+        self.assertNotIn("SECRET", str(ctx.exception))
 
 
 class TestAppSecretProof(unittest.TestCase):

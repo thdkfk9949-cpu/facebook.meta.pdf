@@ -29,6 +29,13 @@ RATE_LIMIT_CODES = {4, 17, 32, 613, 80000, 80003, 80004, 80005, 80006, 80008}
 # Transient server-side faults worth one more attempt.
 TRANSIENT_CODES = {1, 2}
 
+_SECRET_RE = re.compile(r"(access_token|appsecret_proof)=[^&#\s]*", re.IGNORECASE)
+
+
+def redact(text: str) -> str:
+    """Never let a token reach a log line, a traceback, or a report."""
+    return _SECRET_RE.sub(r"\1=REDACTED", text)
+
 
 class GraphError(RuntimeError):
     """A Graph API error with the bits that actually help you fix it."""
@@ -36,12 +43,15 @@ class GraphError(RuntimeError):
     def __init__(self, status: int, payload: dict[str, Any], url: str):
         self.status = status
         self.payload = payload
-        self.url = url
+        self.url = redact(url)
         err = payload.get("error", {}) if isinstance(payload, dict) else {}
         self.code = err.get("code")
         self.subcode = err.get("error_subcode")
         self.type = err.get("type")
-        self.message = err.get("message") or f"HTTP {status}"
+        # requests embeds the full request URL — token and all — in transport
+        # errors, and Meta echoes request fragments back in some error bodies.
+        # Redacting here means no construction path can leak a credential.
+        self.message = redact(str(err.get("message") or f"HTTP {status}"))
         self.fbtrace_id = err.get("fbtrace_id")
         super().__init__(self._render())
 
@@ -147,14 +157,10 @@ class GraphClient:
             ).hexdigest()
         return params
 
-    _SECRET_RE = re.compile(
-        r"(access_token|appsecret_proof)=[^&#\s]*", re.IGNORECASE
-    )
-
     @classmethod
     def _redact(cls, url: str) -> str:
         """Never let a token reach a log line, a traceback, or a report."""
-        return cls._SECRET_RE.sub(r"\1=REDACTED", url)
+        return redact(url)
 
     # -- throttling ---------------------------------------------------------
 
