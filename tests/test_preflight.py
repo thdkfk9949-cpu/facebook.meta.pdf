@@ -21,12 +21,31 @@ ACCOUNT_OK = {
 }
 
 
+# preflight also asks what the token may do, so success paths queue a third
+# response. Failure paths return before that call and queue two.
+PERMISSIONS = {
+    "data": [
+        {"permission": "ads_read", "status": "granted"},
+        {"permission": "public_profile", "status": "granted"},
+    ]
+}
+PERMS_OK = FakeResponse(200, PERMISSIONS)
+
+
+def perms_with(*extra_scopes):
+    rows = list(PERMISSIONS["data"]) + [
+        {"permission": s, "status": "granted"} for s in extra_scopes
+    ]
+    return FakeResponse(200, {"data": rows})
+
+
 class TestPreflight(unittest.TestCase):
     def test_healthy_account_reports_ok_and_exits_zero(self):
         client, _, _ = client_with(
             [
                 FakeResponse(200, ACCOUNT_OK),
                 FakeResponse(200, {"data": [{"id": "c1"}]}),
+                PERMS_OK,
             ]
         )
         code, report = preflight.run(client, "act_1")
@@ -38,7 +57,7 @@ class TestPreflight(unittest.TestCase):
 
     def test_krw_lifetime_spend_is_not_divided_by_a_hundred(self):
         client, _, _ = client_with(
-            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []})]
+            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []}), PERMS_OK]
         )
         _, report = preflight.run(client, "act_1")
         self.assertIn("5,000,000 KRW", report)
@@ -49,6 +68,7 @@ class TestPreflight(unittest.TestCase):
             [
                 FakeResponse(200, {**ACCOUNT_OK, "currency": "USD"}),
                 FakeResponse(200, {"data": []}),
+                PERMS_OK,
             ]
         )
         _, report = preflight.run(client, "act_1")
@@ -61,7 +81,7 @@ class TestPreflight(unittest.TestCase):
         from metaaudit.fetch import ACCOUNT_FIELDS
 
         client, session, _ = client_with(
-            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []})]
+            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []}), PERMS_OK]
         )
         preflight.run(client, "act_1")
         probed = session.calls[0][1]["fields"].split(",")
@@ -77,12 +97,47 @@ class TestPreflight(unittest.TestCase):
 
     def test_hint_is_runnable_on_this_platform(self):
         client, _, _ = client_with(
-            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []})]
+            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []}), PERMS_OK]
         )
         code, report = preflight.run(client, "act_1", env_file=".env")
         self.assertEqual(code, 0)
         self.assertIn("--env-file .env", report)
         self.assertIn("py -m metaaudit" if os.name == "nt" else "python3 -m metaaudit", report)
+
+    def test_read_only_token_is_told_it_cannot_apply(self):
+        client, _, _ = client_with(
+            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []}), PERMS_OK]
+        )
+        code, report = preflight.run(client, "act_1")
+        self.assertEqual(code, 0)
+        self.assertIn("NOT allowed", report)
+        self.assertIn("ads_management", report)
+
+    def test_write_capable_token_is_told_apply_can_run(self):
+        client, _, _ = client_with(
+            [
+                FakeResponse(200, ACCOUNT_OK),
+                FakeResponse(200, {"data": []}),
+                perms_with("ads_management"),
+            ]
+        )
+        _, report = preflight.run(client, "act_1")
+        self.assertIn("Writes        : allowed", report)
+
+    def test_unreadable_permissions_is_unknown_not_denied(self):
+        # A token type that does not expose /me/permissions must not be
+        # reported as lacking the scope — those are different facts.
+        client, _, _ = client_with(
+            [
+                FakeResponse(200, ACCOUNT_OK),
+                FakeResponse(200, {"data": []}),
+                FakeResponse(400, {"error": {"message": "nope", "code": 100}}),
+            ]
+        )
+        code, report = preflight.run(client, "act_1")
+        self.assertEqual(code, 0)
+        self.assertIn("could not be read", report)
+        self.assertNotIn("NOT allowed", report)
 
     def test_bad_token_is_diagnosed_not_raised(self):
         client, _, _ = client_with(
@@ -111,6 +166,7 @@ class TestPreflight(unittest.TestCase):
             [
                 FakeResponse(200, {**ACCOUNT_OK, "account_status": 2, "disable_reason": 3}),
                 FakeResponse(200, {"data": []}),
+                PERMS_OK,
             ]
         )
         code, report = preflight.run(client, "act_1")
@@ -120,7 +176,7 @@ class TestPreflight(unittest.TestCase):
 
     def test_empty_account_is_reported_as_empty(self):
         client, _, _ = client_with(
-            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []})]
+            [FakeResponse(200, ACCOUNT_OK), FakeResponse(200, {"data": []}), PERMS_OK]
         )
         code, report = preflight.run(client, "act_1")
         self.assertEqual(code, 0)

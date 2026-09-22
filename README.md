@@ -66,7 +66,9 @@ cp .env.example .env
 
 ### 0단계: 설정 확인 (먼저 이것부터)
 
-API 호출 2번만 쓰는 점검입니다. 토큰과 권한이 제대로 붙었는지 바로 알려줍니다.
+API 호출 3번만 쓰는 점검입니다. 토큰과 권한이 제대로 붙었는지 바로 알려줍니다.
+쓰기 권한(`ads_management`)이 있는지도 같이 알려주므로, `--apply`가 정작 필요한
+순간에 권한 오류로 실패하는 일을 막습니다.
 
 ```bash
 python3 -m metaaudit --env-file .env --check-auth
@@ -84,6 +86,9 @@ OK  token is valid and can read this ad account.
   Lifetime spend: 48,250,000 KRW
 
 OK  campaigns edge is readable.
+
+  Token scopes  : ads_read
+  Writes        : NOT allowed — ads_management is not granted. --plan works; --apply will fail.
 ```
 
 실패하면 원인과 고칠 지점을 같이 알려줍니다. 계정 노드는 읽히는데 캠페인 목록은 막히는
@@ -257,7 +262,7 @@ python3 -m metaaudit --env-file .env --thresholds my-thresholds.json
 python3 -m unittest discover -s tests -t .
 ```
 
-127개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
+130개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
 산술적으로 명확하게 설계돼 있어서, 테스트가 "뭔가 떴다"가 아니라 정확한 값을 단언합니다.
 
 ### 구조

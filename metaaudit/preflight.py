@@ -31,6 +31,35 @@ ACCOUNT_STATUS = {
 FIELDS = ",".join(ACCOUNT_FIELDS)
 
 
+# Scopes that decide what this tool can do. ads_read runs the audit; writing
+# needs ads_management, and a dry run cannot discover that for you — it sends
+# no POST, so it passes happily with a read-only token.
+READ_SCOPE = "ads_read"
+WRITE_SCOPE = "ads_management"
+
+
+def token_scopes(client: GraphClient) -> tuple[list[str], str]:
+    """Granted scopes for this token, or an empty list and why not.
+
+    Not every token type exposes this endpoint, so a failure here is reported
+    as unknown rather than as "no permission" — the difference matters when
+    someone is deciding whether their setup can write.
+    """
+    try:
+        data = client.get("me/permissions", {})
+    except GraphError as exc:
+        return [], exc.message
+    rows = data.get("data") or []
+    granted = sorted(
+        str(row.get("permission"))
+        for row in rows
+        if row.get("status") == "granted" and row.get("permission")
+    )
+    if not granted:
+        return [], "the endpoint returned no granted permissions"
+    return granted, ""
+
+
 def run(
     client: GraphClient, account_id: str, *, env_file: str | None = None
 ) -> tuple[int, str]:
@@ -98,6 +127,27 @@ def run(
     if client.rate.worst_pct:
         lines.append("")
         lines.append(f"  Rate limit usage: {client.rate.worst_pct:.0f}% of quota")
+
+    # What the token may do, so --apply does not fail only once it matters.
+    lines.append("")
+    scopes, why_unknown = token_scopes(client)
+    if scopes:
+        lines.append(f"  Token scopes  : {', '.join(scopes)}")
+        if WRITE_SCOPE in scopes:
+            lines.append(
+                f"  Writes        : allowed ({WRITE_SCOPE} granted) — --apply can run"
+            )
+        else:
+            lines.append(
+                f"  Writes        : NOT allowed — {WRITE_SCOPE} is not granted. "
+                f"--plan works; --apply will fail."
+            )
+    else:
+        lines.append(f"  Token scopes  : could not be read ({why_unknown})")
+        lines.append(
+            "  Writes        : unknown. The audit works either way; test --apply "
+            "with --dry-run first."
+        )
 
     lines.append("")
     lines.append(f"  API requests used by this check: {client.request_count}")
