@@ -190,7 +190,7 @@ python3 -m metaaudit --env-file .env --fail-on critical   # CRITICAL 있으면 e
 
 ---
 
-## 감사 항목 13가지
+## 감사 항목 14가지
 
 | ID | 잡아내는 것 |
 |---|---|
@@ -205,6 +205,7 @@ python3 -m metaaudit --env-file .env --fail-on critical   # CRITICAL 있으면 e
 | `tracking.silent` | 지출은 있는데 전환이 0으로 기록되는 구간 |
 | `tracking.attribution_mix` | 한 캠페인 안에 기여 기간이 섞여 비교가 불가능한 상태 |
 | `tracking.utm` | UTM 없어 외부 분석으로 검증 불가능한 광고 |
+| `funnel.dropoff` | 퍼널에서 사람이 가장 많이 빠져나가는 지점 (신뢰구간 상한 포함) |
 | `efficiency.outliers` | 통계적으로 유의하게 캠페인 평균보다 나쁜 광고세트 |
 | `efficiency.undecidable` | **판단하기엔 표본이 부족한** 광고세트 (CPA 신뢰구간 제시) |
 
@@ -222,9 +223,12 @@ python3 -m metaaudit --env-file .env --fail-on critical   # CRITICAL 있으면 e
 ### 조치 순서
 
 1. **`tracking.*` 먼저.** 측정이 틀렸으면 나머지 모든 숫자가 거짓입니다.
-2. **다음 `learning.*` 과 `structure.*`.** 주 50이벤트에 못 미치는 광고세트는
+2. **`funnel.dropoff` 다음.** 광고 뒤쪽에서 퍼널이 무너지고 있으면 예산·타겟·소재를
+   아무리 만져도 더 많은 사람을 같은 벽으로 보낼 뿐입니다. 여기가 막혀 있는데
+   전달을 최적화하는 건 돈을 더 빨리 쓰는 일입니다.
+3. **다음 `learning.*` 과 `structure.*`.** 주 50이벤트에 못 미치는 광고세트는
    실제 성과와 무관하게 나빠 보입니다. 이걸 고치기 전에 뭔가를 끄면 안 됩니다.
-3. **`efficiency.*` 는 마지막.** 그리고 `efficiency.undecidable`에 걸린 광고세트는
+4. **`efficiency.*` 는 마지막.** 그리고 `efficiency.undecidable`에 걸린 광고세트는
    아직 끄지 마세요 — 동전 던지기입니다.
 
 ### `efficiency.undecidable`이 가장 자주 돈을 아껴줍니다
@@ -262,7 +266,7 @@ python3 -m metaaudit --env-file .env --thresholds my-thresholds.json
 python3 -m unittest discover -s tests -t .
 ```
 
-153개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
+163개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
 산술적으로 명확하게 설계돼 있어서, 테스트가 "뭔가 떴다"가 아니라 정확한 값을 단언합니다.
 
 ### 구조

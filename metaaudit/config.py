@@ -57,6 +57,13 @@ class Thresholds:
     min_conversions_for_claim: int = 30
     # Two-sided alpha for every comparison test.
     alpha: float = 0.05
+    # Events needed at the top of a funnel transition before its rate is
+    # reported. Below this the rate has no useful upper bound, so "1 of 3
+    # people dropped out" is not a finding, it is an anecdote.
+    funnel_min_upstream: int = 30
+    # A transition that keeps less than this share of the people who reached
+    # it is where the funnel is actually breaking, not merely narrowing.
+    funnel_collapse_ratio: float = 0.5
 
     # --- spend floors ---
     # Entities below this share of account spend are not worth a finding;
