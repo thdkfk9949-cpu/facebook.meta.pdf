@@ -20,7 +20,7 @@
 필요 일예산 = CPA × 50 ÷ 7
 ```
 
-CPA가 50,000원이면 광고세트 하나당 하루 357,000원이 필요합니다. 일예산 100,000원짜리
+CPA가 50,000원이면 광고세트 하나당 하루 357,143원이 필요합니다. 일예산 100,000원짜리
 광고세트는 "성과가 부진한" 게 아니라 **애초에 안정화될 수 없습니다.** 크리에이티브를 바꾸든
 타겟을 바꾸든 달라지지 않습니다. 해법은 예산을 더 적은 광고세트로 합치는 것이고, 이건 **돈이 들지
 않습니다.**
@@ -63,6 +63,44 @@ cp .env.example .env
 > 앱에 "앱 시크릿 필요" 설정이 켜져 있으면 `META_APP_SECRET`도 채워야 합니다.
 
 ## 실행
+
+### 토큰 없이 먼저 보기: `--demo`
+
+무엇을 잡아내는 도구인지 확인하는 데 인증은 필요 없습니다. 데모는 합성 계정 하나를
+감사하며 **API를 한 번도 호출하지 않습니다.**
+
+```bash
+python3 -m metaaudit --demo
+```
+
+실제 계정이 아니고 모든 숫자는 지어낸 것이며, 리포트 맨 위에 그렇게 적혀 있습니다.
+이 계정에는 13개 항목이 전부 걸리도록 결함이 심어져 있고, **정상적으로 구성된 캠페인이
+하나 일부러 섞여 있습니다** — 거기서는 findings가 하나도 나오지 않습니다. 다 잡아내는
+도구는 아무것도 못 잡는 도구만큼 쓸모없기 때문입니다.
+
+숫자는 이 문서 첫머리의 예시 그대로입니다. CPA 50,000원, 일예산 100만원, 광고세트 4개:
+
+```
+[MEDIUM]   4 active ad sets, budget supports 2
+            campaign:신규 고객 유입 — 전환
+            check=structure.fragmentation  confidence=structural  spend=30,000,000 KRW
+
+  Campaign spends 1,000,000 KRW/day at a CPA of 50,000 KRW. Each ad set needs 357,143
+  KRW/day to reach 50 events/week, so this budget supports 2 such ad set(s) — but it is
+  split across 4. Every one of them is starved.
+```
+
+데모 데이터를 파일로 꺼내 구조를 들여다볼 수도 있습니다. 실계정 데이터가 아니므로
+스냅샷을 그대로 공유해도 됩니다.
+
+```bash
+python3 -m metaaudit --demo --format markdown --out out/demo.md
+python3 -m metaaudit --demo --save-snapshot snapshots/demo.json
+```
+
+`--demo`는 `--account`, `--window`, `--from-snapshot`, `--check-auth`와 함께 쓸 수
+없고, 조용히 무시하는 대신 오류를 냅니다. `--account`를 무시했다가는 자기 계정을
+감사했다고 착각할 수 있으니까요.
 
 ### 0단계: 설정 확인 (먼저 이것부터)
 
@@ -197,8 +235,13 @@ python3 -m metaaudit --env-file .env --thresholds my-thresholds.json
 python3 -m unittest discover -s tests -t .
 ```
 
-91개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
+115개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
 산술적으로 명확하게 설계돼 있어서, 테스트가 "뭔가 떴다"가 아니라 정확한 값을 단언합니다.
+
+`--demo`가 쓰는 계정은 별도입니다(`metaaudit/demo.py`). 테스트 픽스처가 항목당 결함
+하나로 최소화된 것인 반면, 데모 계정은 실무자가 알아볼 만한 모양이어야 하기 때문입니다.
+`tests/test_demo.py`가 데모에서 나오는 findings를 고정하고 있어서, 체크가 바뀌면
+데모가 조용히 거짓말을 하는 대신 테스트가 먼저 깨집니다.
 
 ### 구조
 
@@ -206,6 +249,7 @@ python3 -m unittest discover -s tests -t .
 metaaudit/
 ├── api.py          Graph API 클라이언트 (페이징, 레이트리밋, 토큰 마스킹)
 ├── fetch.py        계정 전체를 메모리 스냅샷으로 수집
+├── demo.py         --demo 가 감사하는 합성 계정
 ├── stats.py        유의성 검정 — 모든 성과 주장이 여기를 통과해야 함
 ├── checks/         감사 항목. 순수 함수이며 I/O 없음
 ├── report.py       text / markdown / json 렌더러

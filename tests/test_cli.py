@@ -149,6 +149,20 @@ class TestCli(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("META_ACCESS_TOKEN", err.getvalue())
 
+    def test_window_defaults_to_thirty_days_on_the_live_path(self):
+        """--window carries no argparse default, so the fallback is load-bearing."""
+        fetched = unittest.mock.Mock(return_value=build_account())
+        env = {"META_ACCESS_TOKEN": "t", "META_AD_ACCOUNT_ID": "act_1"}
+        for argv, expected in (([], 30), (["--window", "14"], 14)):
+            with self.subTest(argv=argv):
+                with unittest.mock.patch.dict("os.environ", env, clear=False), \
+                        unittest.mock.patch("metaaudit.cli.GraphClient"), \
+                        unittest.mock.patch("metaaudit.cli.fetch_snapshot", fetched), \
+                        redirect_stdout(io.StringIO()):
+                    code = main(argv)
+                self.assertEqual(code, 0)
+                self.assertEqual(fetched.call_args.kwargs["window_days"], expected)
+
     def test_bad_snapshot_path_is_reported_cleanly(self):
         err = io.StringIO()
         with redirect_stderr(err):

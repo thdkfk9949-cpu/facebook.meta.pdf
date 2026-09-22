@@ -8,12 +8,14 @@ import os
 import sys
 from pathlib import Path
 
-from . import __version__, preflight, snapshot_io
+from . import __version__, demo, preflight, snapshot_io
 from .api import GraphClient, GraphError
 from .checks import all_checks, run_all
 from .config import Settings, Thresholds, load_env_file
 from .fetch import fetch_snapshot
 from .report import RENDERERS
+
+DEFAULT_WINDOW_DAYS = 30
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env-file", help="Read credentials from this .env file")
     parser.add_argument("--api-version", help="Graph API version, e.g. v23.0")
     parser.add_argument(
-        "--window", type=int, default=30, metavar="DAYS",
+        "--window", type=int, default=None, metavar="DAYS",
         help="Audit window in days, ending yesterday (default: 30)",
     )
     parser.add_argument(
@@ -63,6 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--from-snapshot", metavar="PATH",
         help="Run the checks against a saved snapshot; makes no API calls",
+    )
+    parser.add_argument(
+        "--demo", action="store_true",
+        help=(
+            "Audit a synthetic account instead of a real one. Needs no token "
+            "and makes no API calls — it shows what the report looks like."
+        ),
     )
     parser.add_argument(
         "--fail-on", choices=["never", "critical", "high", "medium", "low", "any"],
@@ -127,7 +136,32 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    if args.from_snapshot:
+    if args.demo:
+        # Refused rather than quietly ignored: silently dropping --account
+        # would let someone believe they had just audited the account they
+        # named.
+        for flag, present, why in (
+            ("--from-snapshot", bool(args.from_snapshot),
+             "both name where the data comes from; pick one"),
+            ("--check-auth", args.check_auth,
+             "the demo makes no API calls, so there is no token to check"),
+            ("--account", bool(args.account),
+             "the demo audits a synthetic account, not one of yours"),
+            ("--window", args.window is not None,
+             f"the demo data covers a fixed {demo.WINDOW_DAYS}-day window"),
+        ):
+            if present:
+                print(
+                    f"error: --demo cannot be combined with {flag}: {why}",
+                    file=sys.stderr,
+                )
+                return 2
+
+    window_days = DEFAULT_WINDOW_DAYS if args.window is None else args.window
+
+    if args.demo:
+        snapshot = demo.build_demo_account()
+    elif args.from_snapshot:
         try:
             snapshot = snapshot_io.load(args.from_snapshot)
         except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -145,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
             settings = Settings.from_env(
                 account=args.account,
                 api_version=args.api_version,
-                window_days=args.window,
+                window_days=window_days,
                 thresholds=thresholds,
                 env=env,
             )
@@ -177,13 +211,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 3
 
-        if args.save_snapshot:
-            written = snapshot_io.save(snapshot, args.save_snapshot)
-            print(
-                f"snapshot written to {written} (contains account data — it is "
-                f"gitignored by default)",
-                file=sys.stderr,
-            )
+    if args.save_snapshot and not args.from_snapshot:
+        written = snapshot_io.save(snapshot, args.save_snapshot)
+        note = (
+            "synthetic data — safe to share"
+            if args.demo
+            else "contains account data — it is gitignored by default"
+        )
+        print(f"snapshot written to {written} ({note})", file=sys.stderr)
 
     results = run_all(snapshot, thresholds, only=args.only)
     report = RENDERERS[args.format](snapshot, results, thresholds)

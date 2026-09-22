@@ -141,6 +141,11 @@ def render_markdown(snap: Snapshot, results: list[CheckResult], th: Thresholds) 
     out.append(f"`{snap.account_id}` · {snap.since} → {snap.until} ({snap.window_days}d) · "
                f"{fmt(snap.account_insights.spend, snap.currency)} spend")
     out.append("")
+    # Caveats about the data itself go above the findings: they decide how
+    # much any of the numbers below are worth.
+    for warning in snap.warnings:
+        out.append(f"> **{warning}**")
+        out.append("")
     counts = {s: sum(1 for f in findings if f.severity == s) for s in Severity}
     out.append("| Severity | Count |")
     out.append("|---|---|")
