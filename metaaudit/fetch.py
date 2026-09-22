@@ -216,11 +216,19 @@ class AdSet:
     bid_amount: float = 0.0
     optimization_goal: str = ""
     billing_event: str = ""
+    destination_type: str = ""
+    budget_remaining: float = 0.0
     learning_stage_info: dict[str, Any] = field(default_factory=dict)
     promoted_object: dict[str, Any] = field(default_factory=dict)
     attribution_spec: list[dict[str, Any]] = field(default_factory=list)
     targeting: dict[str, Any] = field(default_factory=dict)
     is_dynamic_creative: bool = False
+    # Timing. Without these an ad set that spent a quarter of its budget is
+    # indistinguishable from one that ran a quarter of the window, and those
+    # call for opposite fixes.
+    created_time: str = ""
+    start_time: str = ""
+    end_time: str = ""
     updated_time: str = ""
     insights: Insights = field(default_factory=Insights)
     prev_insights: Insights = field(default_factory=Insights)
@@ -287,6 +295,11 @@ class Campaign:
     lifetime_budget: float = 0.0
     bid_strategy: str = ""
     special_ad_categories: list[str] = field(default_factory=list)
+    budget_remaining: float = 0.0
+    spend_cap: float = 0.0
+    created_time: str = ""
+    start_time: str = ""
+    stop_time: str = ""
     updated_time: str = ""
     insights: Insights = field(default_factory=Insights)
     adsets: list[AdSet] = field(default_factory=list)
@@ -427,6 +440,11 @@ def fetch_snapshot(
             lifetime_budget=to_major(row.get("lifetime_budget"), currency),
             bid_strategy=row.get("bid_strategy", "") or "",
             special_ad_categories=row.get("special_ad_categories") or [],
+            budget_remaining=to_major(row.get("budget_remaining"), currency),
+            spend_cap=to_major(row.get("spend_cap"), currency),
+            created_time=row.get("created_time", "") or "",
+            start_time=row.get("start_time", "") or "",
+            stop_time=row.get("stop_time", "") or "",
             updated_time=row.get("updated_time", ""),
         )
 
@@ -448,11 +466,16 @@ def fetch_snapshot(
             bid_amount=to_major(row.get("bid_amount"), currency),
             optimization_goal=row.get("optimization_goal", "") or "",
             billing_event=row.get("billing_event", "") or "",
+            destination_type=row.get("destination_type", "") or "",
+            budget_remaining=to_major(row.get("budget_remaining"), currency),
             learning_stage_info=row.get("learning_stage_info") or {},
             promoted_object=row.get("promoted_object") or {},
             attribution_spec=row.get("attribution_spec") or [],
             targeting=row.get("targeting") or {},
             is_dynamic_creative=bool(row.get("is_dynamic_creative")),
+            created_time=row.get("created_time", "") or "",
+            start_time=row.get("start_time", "") or "",
+            end_time=row.get("end_time", "") or "",
             updated_time=row.get("updated_time", ""),
         )
         adsets[adset.id] = adset

@@ -297,3 +297,50 @@ class TestCpaInterval(unittest.TestCase):
         from metaaudit.stats import cpa_interval
 
         self.assertIsNone(cpa_interval(50000, 0))
+
+
+class TestNoFieldIsFetchedAndThrownAway(unittest.TestCase):
+    """Every field asked of Meta must land somewhere, or be listed as unused.
+
+    Regression: ADSET_FIELDS requested created_time, start_time and end_time,
+    the model kept none of them, and the snapshot could not answer "did this
+    ad set run for the whole window?" — the question its own spend numbers
+    raised. Paying for a field and discarding it is the quiet kind of bug.
+    """
+
+    # Fields fetched for a reason other than storage, with that reason.
+    DELIBERATELY_UNSTORED = {
+        # Read to build the snapshot header, not kept on the entity.
+        "account": {"id", "timezone_name", "amount_spent", "account_status",
+                    "disable_reason", "spend_cap", "currency", "name"},
+        # Nested creative is flattened into Ad fields by the fetcher.
+        "ad": {"creative{id,name,url_tags,object_story_spec,asset_feed_spec,"
+               "effective_object_story_id,degrees_of_freedom_spec,status}"},
+        "campaign": set(),
+        "adset": set(),
+    }
+
+    def _stored(self, cls):
+        import dataclasses
+
+        return {f.name for f in dataclasses.fields(cls)}
+
+    def test_every_adset_field_is_stored(self):
+        from metaaudit.fetch import ADSET_FIELDS, AdSet
+
+        missing = (
+            set(ADSET_FIELDS)
+            - self._stored(AdSet)
+            - self.DELIBERATELY_UNSTORED["adset"]
+        )
+        self.assertEqual(missing, set(), f"fetched but discarded: {sorted(missing)}")
+
+    def test_every_campaign_field_is_stored(self):
+        from metaaudit.fetch import CAMPAIGN_FIELDS, Campaign
+
+        missing = (
+            set(CAMPAIGN_FIELDS)
+            - self._stored(Campaign)
+            - self.DELIBERATELY_UNSTORED["campaign"]
+        )
+        self.assertEqual(missing, set(), f"fetched but discarded: {sorted(missing)}")
