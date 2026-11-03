@@ -137,9 +137,18 @@ def main(argv: list[str] | None = None) -> int:
         env = dict(os.environ)
         if args.env_file:
             try:
-                env.update(load_env_file(args.env_file))
+                from_file = load_env_file(args.env_file)
             except (OSError, ValueError) as exc:
                 print(f"error: bad --env-file: {exc}", file=sys.stderr)
+                return 2
+            env.update(from_file)
+            if not (env.get("META_ACCESS_TOKEN") or "").strip():
+                print(
+                    f"error: META_ACCESS_TOKEN is empty in {args.env_file}. Open "
+                    "that file, paste the token directly after "
+                    "META_ACCESS_TOKEN= on the same line, and save it.",
+                    file=sys.stderr,
+                )
                 return 2
         try:
             settings = Settings.from_env(

@@ -86,6 +86,12 @@ class TestEnvFile(unittest.TestCase):
         self.assertEqual(env["META_AD_ACCOUNT_ID"], "act_5")
         self.assertEqual(env["META_API_VERSION"], "v23.0")
 
+    def test_tolerates_a_windows_byte_order_mark(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text("META_ACCESS_TOKEN=abc\n", encoding="utf-8-sig")
+            self.assertEqual(load_env_file(path)["META_ACCESS_TOKEN"], "abc")
+
     def test_rejects_malformed_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / ".env"

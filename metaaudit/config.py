@@ -155,7 +155,9 @@ def load_env_file(path: str | os.PathLike[str]) -> dict[str, str]:
     containing ``$`` should survive unchanged.
     """
     out: dict[str, str] = {}
-    text = Path(path).read_text(encoding="utf-8")
+    # utf-8-sig: Windows Notepad can save with a byte-order mark, which would
+    # otherwise glue itself onto the first key.
+    text = Path(path).read_text(encoding="utf-8-sig")
     for lineno, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
