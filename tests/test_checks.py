@@ -323,6 +323,111 @@ class TestEfficiencyGuardrails(unittest.TestCase):
         self.assertGreater(f.evidence["cpa_high"], f.evidence["cpa"])
 
 
+class TestFunnelDiagnosis(unittest.TestCase):
+    """c1's four ad sets are identical, so each one alone is judged against the
+    pooled other three: 2.0% CTR, 0.625% click-to-purchase, CPA 50."""
+
+    def diagnose(self, snap, name):
+        findings, _ = findings_for("diagnosis.funnel", snap)
+        return next((f for f in findings if f.entity_name == name), None)
+
+    def test_healthy_identical_siblings_get_no_diagnosis(self):
+        findings, _ = findings_for("diagnosis.funnel")
+        self.assertEqual([f for f in findings if f.entity_name.startswith("c1-")], [])
+
+    def test_better_cpa_is_never_diagnosed_even_with_a_lower_ctr(self):
+        # as22 has a lower CTR than its sibling but a far better CPA.
+        self.assertIsNone(self.diagnose(build_account(), "c2-fatigued"))
+
+    def test_low_ctr_points_at_the_creative(self):
+        snap = build_account()
+        snap.campaigns[0].adsets[0].insights = ins(
+            spend=1250, impressions=200_000, clicks=2000, purchases=12
+        )
+        f = self.diagnose(snap, "c1-adset-1")
+        self.assertEqual(f.evidence["verdict"], "creative")
+        self.assertEqual(f.confidence, Confidence.MEASURED)
+        self.assertEqual(f.evidence["peer_scope"], "campaign")
+        self.assertTrue(f.evidence["stages"]["click"]["broken"])
+        self.assertFalse(f.evidence["stages"]["conversion"]["broken"])
+        self.assertIn("Leave the targeting alone", f.recommendation)
+
+    def test_good_ctr_with_low_conversion_points_past_the_click(self):
+        snap = build_account()
+        snap.campaigns[0].adsets[0].insights = ins(
+            spend=1250, impressions=200_000, clicks=4000, purchases=8
+        )
+        f = self.diagnose(snap, "c1-adset-1")
+        self.assertEqual(f.evidence["verdict"], "post_click")
+        self.assertFalse(f.evidence["stages"]["click"]["broken"])
+
+    def test_clicks_that_never_land_point_at_page_load(self):
+        snap = build_account()
+        for adset in snap.campaigns[0].adsets:
+            adset.insights.actions.update({"link_click": 3000, "landing_page_view": 2700})
+        loser = snap.campaigns[0].adsets[0]
+        loser.insights.actions.update(
+            {"landing_page_view": 1200, "offsite_conversion.fb_pixel_purchase": 11}
+        )
+        f = self.diagnose(snap, "c1-adset-1")
+        self.assertEqual(f.evidence["verdict"], "page_load")
+        self.assertTrue(f.evidence["uses_link_clicks"])
+        self.assertIn("page_load", f.evidence["stages"])
+
+    def test_link_clicks_are_ignored_unless_every_peer_reports_them(self):
+        snap = build_account()
+        snap.campaigns[0].adsets[0].insights = ins(
+            spend=1250, impressions=200_000, clicks=2000, purchases=12
+        )
+        snap.campaigns[0].adsets[0].insights.actions["link_click"] = 1500
+        f = self.diagnose(snap, "c1-adset-1")
+        self.assertFalse(f.evidence["uses_link_clicks"])
+
+    def test_high_cpm_with_normal_rates_points_at_the_audience(self):
+        snap = build_account()
+        snap.campaigns[0].adsets[0].insights = ins(
+            spend=2500, impressions=200_000, clicks=4000, purchases=25, frequency=4.0
+        )
+        f = self.diagnose(snap, "c1-adset-1")
+        self.assertEqual(f.evidence["verdict"], "audience")
+        self.assertEqual(f.confidence, Confidence.HEURISTIC)
+        self.assertIn("saturated", f.title)
+
+    def test_a_small_gap_on_few_conversions_says_change_nothing(self):
+        snap = build_account()
+        snap.campaigns[0].adsets[0].insights = ins(
+            spend=1250, impressions=200_000, clicks=4000, purchases=18
+        )
+        f = self.diagnose(snap, "c1-adset-1")
+        self.assertEqual(f.evidence["verdict"], "insufficient_data")
+        self.assertEqual(f.severity, Severity.INFO)
+        self.assertIn("Change nothing yet", f.recommendation)
+
+    def test_without_campaign_siblings_the_verdict_is_downgraded(self):
+        snap = build_account()
+        loser = snap.campaigns[0].adsets[0]
+        loser.insights = ins(spend=1250, impressions=200_000, clicks=500, purchases=3)
+        snap.campaigns[0].adsets = [loser]
+        f = self.diagnose(snap, "c1-adset-1")
+        self.assertEqual(f.evidence["peer_scope"], "account")
+        self.assertEqual(f.evidence["verdict"], "creative")
+        self.assertEqual(f.confidence, Confidence.HEURISTIC)
+
+    def test_learning_adsets_are_left_alone(self):
+        snap = build_account()
+        loser = snap.campaigns[0].adsets[0]
+        loser.insights = ins(spend=1250, impressions=200_000, clicks=2000, purchases=12)
+        loser.learning_stage_info = {"status": "LEARNING"}
+        self.assertIsNone(self.diagnose(snap, "c1-adset-1"))
+
+    def test_skips_when_nothing_has_a_peer(self):
+        snap = build_account()
+        snap.campaigns = snap.campaigns[:1]
+        snap.campaigns[0].adsets = snap.campaigns[0].adsets[:1]
+        _, result = findings_for("diagnosis.funnel", snap)
+        self.assertIn("comparable peer", result.skipped_reason)
+
+
 class TestRobustness(unittest.TestCase):
     def test_empty_account_produces_no_findings_and_no_crash(self):
         empty = Snapshot(

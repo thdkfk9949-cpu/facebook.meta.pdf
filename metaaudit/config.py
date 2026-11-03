@@ -58,6 +58,17 @@ class Thresholds:
     # Two-sided alpha for every comparison test.
     alpha: float = 0.05
 
+    # --- funnel diagnosis ---
+    # An ad set is only diagnosed when its CPA is at least this much worse
+    # than its peers, and a funnel stage only counts as "the" break when it
+    # is both significant and at least this far below peers. Impression
+    # counts are so large that a 3% CTR gap clears a significance test; it
+    # is still not worth changing an ad over.
+    diag_min_gap_pct: float = 20.0
+    # CPM this many times the peers' CPM, with click and post-click rates
+    # in line, points at the audience rather than the ad.
+    diag_cpm_ratio: float = 1.5
+
     # --- spend floors ---
     # Entities below this share of account spend are not worth a finding;
     # they are rounding error and they crowd out the report.

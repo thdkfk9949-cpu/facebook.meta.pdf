@@ -2,6 +2,7 @@
 
 from . import (  # noqa: F401
     creative,
+    diagnosis,
     efficiency,
     fatigue,
     fragmentation,
