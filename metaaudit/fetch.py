@@ -20,7 +20,7 @@ log = logging.getLogger("metaaudit.fetch")
 
 ACCOUNT_FIELDS = [
     "id", "name", "account_status", "currency", "timezone_name",
-    "amount_spent", "spend_cap", "business", "disable_reason",
+    "amount_spent", "spend_cap", "disable_reason",
 ]
 
 CAMPAIGN_FIELDS = [

@@ -237,5 +237,14 @@ class TestSnapshotIO(unittest.TestCase):
             snapshot_io.loads(json.dumps({"schema_version": 99, "snapshot": {}}))
 
 
+class TestFetchFields(unittest.TestCase):
+    def test_account_fields_need_only_ads_read(self):
+        # "business" requires business_management; a plain ads_read token gets
+        # a 400 on the very first call of the audit.
+        from metaaudit.fetch import ACCOUNT_FIELDS
+        self.assertNotIn("business", ACCOUNT_FIELDS)
+
+
 if __name__ == "__main__":
     unittest.main()
+
