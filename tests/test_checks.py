@@ -264,6 +264,24 @@ class TestTracking(unittest.TestCase):
         self.assertEqual(findings[0].severity, Severity.CRITICAL)
         self.assertEqual(findings[0].level, "account")
 
+    def test_no_adsets_in_scope_is_a_skip_not_a_critical(self):
+        # Regression: spend from paused campaigns outside the fetch was reported
+        # as "no conversions recorded anywhere".
+        snap = build_account()
+        snap.campaigns = []
+        findings, result = findings_for("tracking.silent", snap)
+        self.assertEqual(findings, [])
+        self.assertIn("--include-paused", result.skipped_reason)
+
+    def test_traffic_only_accounts_are_not_called_silent(self):
+        snap = build_account()
+        for adset in snap.adsets:
+            adset.optimization_goal = "LINK_CLICKS"
+            adset.insights.actions = {}
+        findings, result = findings_for("tracking.silent", snap)
+        self.assertEqual(findings, [])
+        self.assertTrue(result.skipped_reason)
+
     def test_mixed_attribution_windows_are_flagged(self):
         findings, _ = findings_for("tracking.attribution_mix")
         self.assertTrue(any(f.entity_name == "Sales — misconfigured" for f in findings))
@@ -412,6 +430,16 @@ class TestFunnelDiagnosis(unittest.TestCase):
         self.assertEqual(f.evidence["peer_scope"], "account")
         self.assertEqual(f.evidence["verdict"], "creative")
         self.assertEqual(f.confidence, Confidence.HEURISTIC)
+
+    def test_paused_adsets_that_spent_are_still_diagnosed(self):
+        snap = build_account()
+        for adset in snap.campaigns[0].adsets:
+            adset.effective_status = "CAMPAIGN_PAUSED"
+        snap.campaigns[0].adsets[0].insights = ins(
+            spend=1250, impressions=200_000, clicks=2000, purchases=12
+        )
+        f = self.diagnose(snap, "c1-adset-1")
+        self.assertEqual(f.evidence["verdict"], "creative")
 
     def test_learning_adsets_are_left_alone(self):
         snap = build_account()

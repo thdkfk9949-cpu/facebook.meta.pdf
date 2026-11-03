@@ -400,7 +400,13 @@ def fetch_snapshot(
 
     # Effective-status filter, applied server side so we do not page through
     # years of archived campaigns to throw them away locally.
-    live = ["ACTIVE", "PAUSED"] if include_paused else ["ACTIVE"]
+    # A paused campaign leaves its ad sets at CAMPAIGN_PAUSED and its ads at
+    # CAMPAIGN_PAUSED / ADSET_PAUSED, not PAUSED, so all three are needed.
+    live = (
+        ["ACTIVE", "PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED"]
+        if include_paused
+        else ["ACTIVE"]
+    )
     status_filter = (
         '[{"field":"effective_status","operator":"IN","value":'
         + "[" + ",".join(f'"{s}"' for s in live) + "]}]"
@@ -506,5 +512,11 @@ def fetch_snapshot(
             adsets[entity_id].prev_insights = ins
 
     snap.campaigns = list(campaigns.values())
+    if not include_paused and not adsets and snap.account_insights.spend > 0:
+        snap.warnings.append(
+            "The account spent money in this window but has no active ad sets "
+            "right now, so most checks have nothing to look at. Re-run with "
+            "--include-paused to audit the paused campaigns that did the spending."
+        )
     snap.api_requests = client.request_count
     return snap

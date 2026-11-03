@@ -101,6 +101,9 @@ python3 -m metaaudit --env-file .env --format markdown --out out/audit.md
 # 최근 14일만, 특정 계정
 python3 -m metaaudit --env-file .env --account act_123456 --window 14
 
+# 지금은 꺼둔(일시중지) 캠페인까지 포함해서 지난 90일 점검
+python3 -m metaaudit --env-file .env --window 90 --include-paused
+
 # 항목 목록 보기 / 특정 항목만 실행
 python3 -m metaaudit --list-checks
 python3 -m metaaudit --env-file .env --only learning.underbudgeted --only structure.fragmentation
@@ -227,7 +230,7 @@ python3 -m metaaudit --env-file .env --thresholds my-thresholds.json
 python3 -m unittest discover -s tests -t .
 ```
 
-111개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
+120개 테스트가 네트워크 없이 돕니다. `tests/fixtures.py`의 합성 계정은 결함이
 산술적으로 명확하게 설계돼 있어서, 테스트가 "뭔가 떴다"가 아니라 정확한 값을 단언합니다.
 
 ### 구조

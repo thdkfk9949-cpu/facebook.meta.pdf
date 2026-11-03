@@ -22,6 +22,9 @@ ad set converts better than a prospecting one for reasons that are not a
 defect). Without campaign peers it falls back to the rest of the account and
 downgrades the confidence accordingly.
 
+Paused ad sets are diagnosed too when they spent in the window (fetch them
+with ``--include-paused``): the answer is still useful for the next launch.
+
 Ad sets in the learning phase are left to ``learning.stuck``: their numbers
 are not settled, and the advice there is already "do not touch".
 """
@@ -98,7 +101,7 @@ def _peers(snap: Snapshot, adset: AdSet, actions: Sequence[str]) -> tuple[list[A
     def comparable(other: AdSet) -> bool:
         return (
             other.id != adset.id
-            and other.is_delivering
+            and other.status != "DELETED"
             and other.optimizes_for_conversions
             and other.conversion_action_types() == tuple(actions)
             and other.insights.impressions > 0
@@ -175,12 +178,12 @@ def check_funnel(snap: Snapshot, th: Thresholds) -> CheckResult:
 
     candidates = [
         a for a in snap.adsets
-        if a.is_delivering and a.optimizes_for_conversions and a.insights.impressions > 0
+        if a.optimizes_for_conversions and a.insights.impressions > 0
     ]
     if not candidates:
         result.skipped_reason = (
-            "no delivering ad sets optimize for a conversion event, so there is "
-            "no funnel to diagnose"
+            "no ad set in scope optimizes for a conversion event and spent in "
+            "the window, so there is no funnel to diagnose"
         )
         return result
 
@@ -389,7 +392,7 @@ def check_funnel(snap: Snapshot, th: Thresholds) -> CheckResult:
 
     if compared == 0 and not result.findings:
         result.skipped_reason = (
-            "no settled ad set has a comparable peer (another delivering ad set "
+            "no settled ad set has a comparable peer (another ad set "
             "optimizing for the same event), so there is nothing to diagnose "
             "against"
         )

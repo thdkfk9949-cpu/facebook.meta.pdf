@@ -122,7 +122,20 @@ def check_silent_tracking(snap: Snapshot, th: Thresholds) -> CheckResult:
     result = CheckResult("tracking.silent", "Spend with zero recorded conversions")
     account_conv = 0.0
     account_spend = snap.account_insights.spend
-    for adset in snap.adsets:
+    in_scope = [a for a in snap.adsets if a.optimizes_for_conversions]
+    if not in_scope:
+        # Zero conversions from zero conversion ad sets proves nothing: the
+        # spend may be paused campaigns outside the fetch, or traffic and
+        # engagement campaigns that were never meant to convert.
+        result.skipped_reason = (
+            "no ad set in scope optimizes for a conversion event"
+            + (
+                "" if snap.adsets
+                else " (no ad sets were fetched at all; try --include-paused)"
+            )
+        )
+        return result
+    for adset in in_scope:
         account_conv += adset.insights.conversions(adset.conversion_action_types())
     if account_conv <= 0:
         if account_spend > 0:
@@ -145,8 +158,8 @@ def check_silent_tracking(snap: Snapshot, th: Thresholds) -> CheckResult:
                     ),
                     recommendation=(
                         "Check the pixel in Events Manager first. If events do "
-                        "appear there, re-run with --conversion-action set to the "
-                        "action type your account actually reports."
+                        "appear there, check that each ad set's conversion event "
+                        "(promoted_object) is the one the pixel actually sends."
                     ),
                     evidence={"account_spend": round(account_spend, 2)},
                     spend_at_stake=account_spend,
